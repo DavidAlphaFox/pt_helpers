@@ -96,7 +96,7 @@ build_if(Clauses) ->
   end,
   _ = if_all_ast(Clauses1, ok),
   {'if', 1, Clauses1}.
-
+%% 构建闭包
 -spec build_clause(ast(), ast()) -> ast().
 build_clause(Vars, Body) -> build_clause(Vars, [], Body).
 -spec build_clause(ast(), ast(), ast()) -> ast().
@@ -194,7 +194,7 @@ parse(AST, Options) ->
       main_file = FileName,
       ast = AST,
       options = Options
-    },
+    }, %% 构建AST的record
   Index = 1,
   Files = [FileName],
   {_, _, PT_AST1} = lists:foldl(
@@ -224,6 +224,7 @@ generate(#pt_ast{
     added_functions = AddedFunctions,
     added_records = AddedRecords
   }) ->
+  %% 使用lists，将AST各部分进行分割
   {AstToExport, AstTypes, AstFunctions, AstEof} = cut_ast_(
     AST,
     ExportPos, 
@@ -291,7 +292,7 @@ cut_ast_(AST, ExportPos, FunctionPos) ->
     lists:sublist(AST, FunctionPos + 1, length(AST) - FunctionPos - 1),
     [lists:nth(length(AST), AST)]
   }.
-
+%% 添加函数导出
 generate_exports_(AddedFunctions) ->
   Exports = lists:foldl(
     fun(#pt_fun{name = Name, arity = Arity}, Ast) ->
@@ -301,13 +302,13 @@ generate_exports_(AddedFunctions) ->
     length(Exports) > 0 -> [{attribute, 1, export, Exports}];
     true -> []
   end.
-
+%%  添加函数体
 generate_functions_(AddedFunctions) ->
   lists:foldl(
     fun(#pt_fun{ast = AstFunction}, Ast) ->
         Ast ++ [AstFunction]
     end, [], AddedFunctions).
-
+%% 添加记录类型
 generate_records_(AddedRecords) ->
   lists:foldl(
     fun(#pt_record{
@@ -435,52 +436,59 @@ add_export(PT_AST = #pt_ast{exports = Exports}, Name, Arity) ->
 add_record(PT_AST = #pt_ast{added_records = AddedRecs}, Name, Attributes) ->
   {Attrs, AttrTypes, HasType} = add_record_fields_(Attributes, [], [], false),
   AstRecord = {attribute, 1, record, {Name, Attrs}},
-  AstType = {attribute, 1, type, {{record, Name}, AttrTypes}},
+  AstType = {attribute, 1, type, {{record, Name}, AttrTypes}}, %% 添加record的同名类型导出
   Record = #pt_record{
-    name = Name,
-    fields = Attributes,
-    ast = AstRecord,
-    ast_type = AstType,
-    has_type = HasType
-  },
+              name = Name,
+              fields = Attributes,
+              ast = AstRecord,
+              ast_type = AstType,
+              has_type = HasType
+             },
   PT_AST#pt_ast{added_records = AddedRecs ++ [Record]}.
 add_record_fields_([], Result, ResultType, HasTypes) -> 
   {Result, ResultType, HasTypes};
-add_record_fields_([{Attr, Types}|Attributes], Result, ResultType, HasTypes) when is_list(Types) ->
-  {NewResultType, NewHasType} = if 
-    length(Types) > 0 -> 
-      {ResultType ++ [
-          {typed_record_field,
-            {record_field, 1, build_atom(Attr)},
-            {type, 1, union, 
-              [{atom, 1, undefined}] ++ lists:map(fun(E) ->
-                    {type, 1, E, []}
-                end, Types)
-            }}
-        ], true};
-    true ->
-      {ResultType ++ [
-          {record_field, 1, build_atom(Attr)}
-        ], HasTypes}
-  end,
+add_record_fields_([{Attr, Types}|Attributes], Result, ResultType, HasTypes)
+  when is_list(Types) ->
+  {NewResultType, NewHasType} =
+    if
+      length(Types) > 0 -> %% 类型的长度大于0
+        {ResultType ++ [
+                        {typed_record_field,
+                         {record_field, 1, build_atom(Attr)},
+                         {type, 1, union,
+                          [{atom, 1, undefined}] ++
+                            lists:map(fun(E) -> {type, 1, E, []} end, Types)
+                         }}
+                       ], true};
+      true ->
+        {ResultType ++ [
+                        {record_field, 1, build_atom(Attr)}
+                       ], HasTypes}
+    end,
   add_record_fields_(
     Attributes, 
     Result ++ [{record_field, 1, build_atom(Attr)}],
     NewResultType,
     NewHasType
-  );
-add_record_fields_([{Attr, Type}|Attributes], Result, ResultType, _HasTypes) when is_atom(Type) ->
+   );
+%% 属性具有类型，并且类型是原子类型
+add_record_fields_([{Attr, Type}|Attributes], Result, ResultType, _HasTypes)
+  when is_atom(Type) ->
   add_record_fields_(
     Attributes, 
     Result ++ [{record_field, 1, build_atom(Attr)}],
     ResultType ++ [
-      {typed_record_field,
-        {record_field, 1, build_atom(Attr)},
-        {type, 1, union, [{atom, 1, undefined}, {type, 1, Type, []}]}}
-    ],
+                   {typed_record_field,
+                    {record_field, 1, build_atom(Attr)},
+                    {type, 1, union,
+                     [{atom, 1, undefined},
+                      {type, 1, Type, []}]} %% 添加一个类型说明
+                   }],
     true
-  );
-add_record_fields_([Attr|Attributes], Result, ResultType, HasTypes) when is_atom(Attr) ->
+   );
+%% 只有属性，没有属性类型说明
+add_record_fields_([Attr|Attributes], Result, ResultType, HasTypes)
+  when is_atom(Attr) ->
   add_record_fields_(
     Attributes, 
     Result ++ [{record_field, 1, build_atom(Attr)}],
@@ -844,24 +852,26 @@ directive(#pt_ast{directives = Directives}, Name) ->
       end, Directives)).
 
 % Private parse
-
+%% 处理module属性
 parse_definition({attribute, _, module, ModuleName}, {Index, Files, PT_AST}) ->
   {Index + 1, Files, PT_AST#pt_ast{module_name = ModuleName}};
-
+%% 处理compile属性
 parse_definition({attribute, _, compile, Options}, {Index, Files, PT_AST}) ->
   {Index + 1, Files, PT_AST#pt_ast{compile_options = Options}};
-
-parse_definition({attribute, _, export, Exports}, {Index, Files, PT_AST = #pt_ast{exports = Exps}}) ->
+%% 处理导出属性
+parse_definition({attribute, _, export, Exports},
+                 {Index, Files, PT_AST = #pt_ast{exports = Exps}}) ->
   {Index + 1, Files, PT_AST#pt_ast{exports = Exps ++ Exports, exports_pos = Index}};
-
+%% 处理文件属性
 parse_definition({attribute, _, file, {FileName, _}}, {Index, Files, PT_AST}) ->
   {Index + 1, update_files(Files, FileName), PT_AST};
-
-parse_definition({function, _, FunctionName, FunctionArity, FunctionClauses} = FunAST, {Index, Files, PT_AST = #pt_ast{functions = Functions, function_pos = FFP}}) ->
+%% 处理函数
+parse_definition({function, _, FunctionName, FunctionArity, FunctionClauses} = FunAST,
+                 {Index, Files, PT_AST = #pt_ast{functions = Functions, function_pos = FFP}}) ->
   NewFFP = if 
     FFP =:= -1 -> Index;
     true -> FFP
-  end,
+  end, %% 第一个出现的 函数位置
   {
     Index + 1, 
     Files, 
@@ -874,21 +884,21 @@ parse_definition({function, _, FunctionName, FunctionArity, FunctionClauses} = F
           clauses = FunctionClauses,
           ast = FunAST
         }
-      ], 
+      ], %% 将新的函数添加到函数队列中
       function_pos = NewFFP
     }
   };
-
+%% field属性
 parse_definition({attribute, _, field, Field}, {Index, Files, PT_AST = #pt_ast{fields = Fields}}) ->
   NewField = #pt_field{index = Index, data = Field},
   {Index + 1, Files, PT_AST#pt_ast{fields = Fields ++ [NewField]}};
-
+%% 其它属性
 parse_definition({attribute, _, Directive, Data}, {Index, Files, PT_AST = #pt_ast{directives = Directives}}) ->
   {Index + 1, Files, PT_AST#pt_ast{directives = Directives ++ [{Directive, Data}]}};
-
+%% 文件结尾
 parse_definition({eof, N}, {Index, Files, PT_AST}) ->
   {Index + 1, Files, PT_AST#pt_ast{last_line = N}};
-
+%% 其它定义，直接忽略，除非语法错误，否则不应有这种
 parse_definition(_Def, {Index, Files, PT_AST}) ->
   {Index + 1, Files, PT_AST}.
 
@@ -897,15 +907,12 @@ parse_definition(_Def, {Index, Files, PT_AST}) ->
 update_files(Files, File) ->
   NB = length(Files),
   if 
-    NB =:= 1 -> 
-      [File] ++ Files;
+    NB =:= 1 -> [File] ++ Files;
     true -> 
       [_ActualFile, CurrentFile|Rest] = Files,
       if 
-        CurrentFile =:= File -> 
-          [File] ++ Rest;
-        true -> 
-          [File] ++ Files
+        CurrentFile =:= File -> [File] ++ Rest;
+        true -> [File] ++ Files
       end
   end.
 
